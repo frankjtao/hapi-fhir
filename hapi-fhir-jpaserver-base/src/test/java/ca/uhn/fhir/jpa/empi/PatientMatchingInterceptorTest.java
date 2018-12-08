@@ -39,10 +39,8 @@ public class PatientMatchingInterceptorTest extends BaseJpaDstu3Test {
 
     //-- This one does not work yet
     @Test
-    @Transactional(propagation = Propagation.SUPPORTS)
     public void testJpaCreateWithEmpi() {
         
-        System.out.println("testJpaCreateWithEmpi");
         Patient p = new Patient();
         p.getNameFirstRep().setFamily("foo");
         p.getNameFirstRep().addGivenElement().setValue("bar");

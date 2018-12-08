@@ -66,7 +66,6 @@ public class PatientMatchingInterceptorDstu3 extends ServerOperationInterceptorA
     @Override
     public void resourcePreCreate(RequestDetails theRequest, IBaseResource theResource) {
 
-        System.out.println("resourcePreCreate()");
         if (!myPatientDao.getContext().getResourceDefinition(theResource).getName().equals("Patient"))
             return; // skip if it's not patient
 
