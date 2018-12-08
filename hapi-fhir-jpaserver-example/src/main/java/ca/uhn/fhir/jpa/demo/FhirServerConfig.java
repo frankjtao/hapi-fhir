@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import ca.uhn.fhir.jpa.config.BaseJavaConfigDstu3;
 import ca.uhn.fhir.jpa.dao.DaoConfig;
+import ca.uhn.fhir.jpa.empi.PatientMatchingInterceptorDstu3;
 import ca.uhn.fhir.jpa.util.SubscriptionsRequireManualActivationInterceptorDstu3;
 import ca.uhn.fhir.rest.server.interceptor.IServerInterceptor;
 import ca.uhn.fhir.rest.server.interceptor.LoggingInterceptor;
@@ -120,5 +121,13 @@ public class FhirServerConfig extends BaseJavaConfigDstu3 {
 		retVal.setEntityManagerFactory(entityManagerFactory);
 		return retVal;
 	}
+	
+	//-- uncommented out the follow part to enable EMPI
+	//private static final String MASTER_PATIENT_INDEX_SYSTEM = "http://hapi.fhir.org/master-patient-index";
+	//@Bean(autowire = Autowire.BY_TYPE)
+	//public IServerInterceptor patientMachingInterceptor() {
+	//      PatientMatchingInterceptorDstu3 retVal = new PatientMatchingInterceptorDstu3(MASTER_PATIENT_INDEX_SYSTEM);
+	//      return retVal;
+	//}
 
 }
