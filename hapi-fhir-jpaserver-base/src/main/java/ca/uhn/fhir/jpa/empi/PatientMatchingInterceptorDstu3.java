@@ -185,6 +185,7 @@ public class PatientMatchingInterceptorDstu3 extends ServerOperationInterceptorA
         theParams.add(Patient.SP_FAMILY, new StringParam(lastName, true));
         theParams.add(Patient.SP_GIVEN, new StringParam(firstName, true));
         theParams.add(Patient.SP_BIRTHDATE, new DateParam(birthDate));
+        theParams.setLoadSynchronousUpTo(100);
 
         // NOTE: there is issue while calling from JUNIT, ok from real server
         IBundleProvider provider = myPatientDao.search(theParams);

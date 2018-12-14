@@ -7,40 +7,42 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import ca.uhn.fhir.jpa.dao.dstu3.BaseJpaDstu3Test;
+import ca.uhn.fhir.jpa.search.PersistedJpaBundleProvider;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.util.TestUtil;
 
-public class PatientMatchingInterceptorTest extends BaseJpaDstu3Test {
+public class PatientMatchingInterceptorDstu3Test extends BaseJpaDstu3Test {
 
-    private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(PatientMatchingInterceptorTest.class);
+    private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(PatientMatchingInterceptorDstu3Test.class);
 
     private static final String MASTER_PATIENT_INDEX_SYSTEM = "http://hapi.fhir.org/master-patient-index";
 
     private PatientMatchingInterceptorDstu3 myPatientInterceptor;
-    
+
     @After
     public void after() {
         myDaoConfig.getInterceptors().remove(myPatientInterceptor);
+        
+        
     }
 
     @Before
     public void before() {
-        //myPatientInterceptor = mock(PatientMatchingInterceptorDstu3.class);
+        // myPatientInterceptor = mock(PatientMatchingInterceptorDstu3.class);
         myPatientInterceptor = new PatientMatchingInterceptorDstu3(MASTER_PATIENT_INDEX_SYSTEM);
         myPatientInterceptor.setDao(myPatientDao);
-        //myPatientInterceptor.setMyMasterPatientIndexSystem(MASTER_PATIENT_INDEX_SYSTEM);
-        
-        myDaoConfig.getInterceptors().add(myPatientInterceptor);      
+        // myPatientInterceptor.setMyMasterPatientIndexSystem(MASTER_PATIENT_INDEX_SYSTEM);
+
+        myDaoConfig.getInterceptors().add(myPatientInterceptor);
     }
 
-    //-- This one does not work yet
+    // -- This one does not work yet
     @Test
     public void testJpaCreateWithEmpi() {
-        
+
         Patient p = new Patient();
         p.getNameFirstRep().setFamily("foo");
         p.getNameFirstRep().addGivenElement().setValue("bar");
@@ -49,7 +51,7 @@ public class PatientMatchingInterceptorTest extends BaseJpaDstu3Test {
         MethodOutcome methodOutcome = myPatientDao.create(p);
         Patient createdPatient = (Patient) methodOutcome.getResource();
 
-        assertEquals("foo", createdPatient.getNameFirstRep().getFamily());        
+        assertEquals("foo", createdPatient.getNameFirstRep().getFamily());
         assertEquals(MASTER_PATIENT_INDEX_SYSTEM, createdPatient.getIdentifierFirstRep().getSystem());
     }
 
