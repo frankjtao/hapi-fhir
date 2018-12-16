@@ -26,13 +26,13 @@ import ca.uhn.fhir.rest.param.ReferenceParam;
 import ca.uhn.fhir.rest.server.exceptions.InvalidRequestException;
 import ca.uhn.fhir.util.TestUtil;
 
-public class EidEmpiInterceptorR4Test extends BaseJpaR4Test {
+public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
 
-    private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EidEmpiInterceptorR4Test.class);
+    private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EmpiEidInterceptorR4Test.class);
 
     private static final String ENTERPRISE_IDENTIFIER = "http://hapi.fhir.org/enterprise-identifier";
 
-    private EidEmpiInterceptorR4 myInterceptor = new EidEmpiInterceptorR4(ENTERPRISE_IDENTIFIER);
+    private EmpiEidInterceptorR4 myInterceptor = new EmpiEidInterceptorR4(ENTERPRISE_IDENTIFIER);
 
     @Autowired
     @Qualifier("myPersonDaoR4")
@@ -69,7 +69,7 @@ public class EidEmpiInterceptorR4Test extends BaseJpaR4Test {
         // 2. verify EID is injected 
         assertEquals(ENTERPRISE_IDENTIFIER, createdPerson.getIdentifierFirstRep().getSystem());       
         assertNotNull(createdPerson.getIdentifierFirstRep().getValue());
-        System.out.println(createdPerson.getId());
+        ourLog.debug(createdPerson.getId());
     }
 
     @Test
@@ -90,7 +90,7 @@ public class EidEmpiInterceptorR4Test extends BaseJpaR4Test {
         // 2. verify EID is injected 
         assertEquals(ENTERPRISE_IDENTIFIER, createdPerson1.getIdentifierFirstRep().getSystem());       
         assertNotNull(createdPerson1.getIdentifierFirstRep().getValue());
-        System.out.println(createdPerson1.getId());
+        //System.out.println(createdPerson1.getId());
         
         //-- second person
         Person thePerson2 = new Person();
@@ -141,7 +141,7 @@ public class EidEmpiInterceptorR4Test extends BaseJpaR4Test {
         
         // 4. verify they are linked
         assertEquals("Patient/"+methodOutcome.getId().getIdPart(), createdPerson.getLinkFirstRep().getTarget().getReference());   
-        System.out.println(createdPerson.getId());
+        ourLog.debug(createdPerson.getId());
     }
     
     @Test
@@ -187,6 +187,76 @@ public class EidEmpiInterceptorR4Test extends BaseJpaR4Test {
         assertEquals("Patient/"+patientOutcome.getId().getIdPart(), theUpdatedPerson.getLinkFirstRep().getTarget().getReference());        
     }
 
+    @Test
+    //-- updated existing Person, the old person with EID
+    public void testJpaUpdatePerson() {
+
+        Person thePerson = new Person();
+        thePerson.getNameFirstRep().setFamily("foo");
+        thePerson.getNameFirstRep().addGivenElement().setValue("bar");
+        thePerson.getBirthDateElement().setValueAsString("2000-01-01");
+
+        MethodOutcome personOutcome = myPersonDao.create(thePerson);
+        Person createdPerson = (Person) personOutcome.getResource();
+               
+        // 1. verify the Person is created
+        assertEquals("foo", createdPerson.getNameFirstRep().getFamily());
+       
+        // 2. verify EID is injected 
+        assertEquals(ENTERPRISE_IDENTIFIER, createdPerson.getIdentifierFirstRep().getSystem());  
+        String eid = createdPerson.getIdentifierFirstRep().getValue();
+        assertNotNull(eid);
+     
+        //-- change the last name
+        createdPerson.getNameFirstRep().setFamily("smith");
+        myPersonDao.update(createdPerson);
+        
+        // 3. verify the EID is copied
+        SearchParameterMap theParams = new SearchParameterMap();        
+        theParams.add(Person.SP_RES_ID, new NumberParam(personOutcome.getId().getIdPart()));
+        
+        IBundleProvider provider = myPersonDao.search(theParams);
+        List<IBaseResource> theOtherPatientList = provider.getResources(0, provider.size());
+        Person theUpdatedPerson = (Person)theOtherPatientList.get(0);
+        
+        assertEquals("smith", theUpdatedPerson.getNameFirstRep().getFamily());
+        assertEquals(ENTERPRISE_IDENTIFIER, theUpdatedPerson.getIdentifierFirstRep().getSystem());       
+        assertEquals(eid, theUpdatedPerson.getIdentifierFirstRep().getValue());
+    }
+    
+    @Test
+    public void testJpaUpdatePatient() {
+
+        Patient p = new Patient();
+        p.getNameFirstRep().setFamily("foo");
+        p.getNameFirstRep().addGivenElement().setValue("bar");
+        p.getBirthDateElement().setValueAsString("2000-01-01");
+
+        MethodOutcome methodOutcome = myPatientDao.create(p);
+        Patient createdPatient = (Patient) methodOutcome.getResource();
+               
+        // 1. verify the Patient is created
+        assertEquals("foo", createdPatient.getNameFirstRep().getFamily());
+       
+        // 2. the patient is updated (last name changed
+        createdPatient.getNameFirstRep().setFamily("Smith");
+        myPatientDao.update(createdPatient);
+        
+        // 3. search the Person by link
+        SearchParameterMap theParams = new SearchParameterMap();
+        ReferenceParam refParam = new ReferenceParam();
+        refParam.setValue(methodOutcome.getId().getValueAsString());
+        theParams.add(Person.SP_LINK, refParam);
+        
+        IBundleProvider provider = myPersonDao.search(theParams);
+        List<IBaseResource> theOtherPatientList = provider.getResources(0, 1);
+        
+        Person matchedPerson = (Person)theOtherPatientList.get(0);
+               
+        assertEquals(ENTERPRISE_IDENTIFIER, matchedPerson.getIdentifierFirstRep().getSystem());       
+        assertNotNull(matchedPerson.getIdentifierFirstRep().getValue());
+    }
+    
     @AfterClass
     public static void afterClassClearContext() {
         TestUtil.clearAllStaticFieldsForUnitTest();

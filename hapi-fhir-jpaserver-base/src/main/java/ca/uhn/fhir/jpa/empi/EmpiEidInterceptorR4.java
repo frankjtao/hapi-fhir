@@ -24,6 +24,7 @@ import ca.uhn.fhir.jpa.dao.SearchParameterMap;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
 import ca.uhn.fhir.rest.api.server.RequestDetails;
 import ca.uhn.fhir.rest.param.DateParam;
+import ca.uhn.fhir.rest.param.ReferenceParam;
 import ca.uhn.fhir.rest.param.StringAndListParam;
 import ca.uhn.fhir.rest.param.StringOrListParam;
 import ca.uhn.fhir.rest.param.StringParam;
@@ -49,9 +50,9 @@ import ca.uhn.fhir.rest.server.interceptor.ServerOperationInterceptorAdapter;
  * limitations under the License.
  * #L%
  */
-public class EidEmpiInterceptorR4 extends ServerOperationInterceptorAdapter {
+public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
-    private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EidEmpiInterceptorR4.class);
+    private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EmpiEidInterceptorR4.class);
 
     @Autowired
     @Qualifier("myPatientDaoR4")
@@ -64,10 +65,10 @@ public class EidEmpiInterceptorR4 extends ServerOperationInterceptorAdapter {
     @Autowired
     @Qualifier("myPractitionerDaoR4")
     private IFhirResourceDao<Practitioner> myPractitionerDao;
-       
+
     private String myEnterpriseIdentifierSystem;
 
-    public EidEmpiInterceptorR4(String theMasterPatientIndexSystem) {
+    public EmpiEidInterceptorR4(String theMasterPatientIndexSystem) {
         super();
 
         Validate.notBlank(theMasterPatientIndexSystem);
@@ -89,109 +90,114 @@ public class EidEmpiInterceptorR4 extends ServerOperationInterceptorAdapter {
 
     @Override
     public void resourcePreCreate(RequestDetails theRequest, IBaseResource theResource) {
-        System.out.println("ENTER : resourcePreCreate()");
-        
-        if (myPatientDao.getContext().getResourceDefinition(theResource).getName().equals("Patient")) {
-            System.out.println("This is patient resource");
-        } else if (myPersonDao.getContext().getResourceDefinition(theResource).getName().equals("Person")) {
-            System.out.println("This is person resource");
+        //System.out.println("ENTER : resourcePreCreate()");
+
+        if (myPersonDao.getContext().getResourceDefinition(theResource).getName().equals("Person")) {
             
-            Person thePerson = (Person)theResource;
+            // Duplicate check
+            Person thePerson = (Person) theResource;
             List<IBaseResource> getMatchedPersonList = getMatchedPerson(theRequest, thePerson);
             int size = getMatchedPersonList.size();
-            
-            System.out.println("size = " + size);
+
             if (size == 0) {
-                injectEid(thePerson);              
+                injectEid(thePerson, null); // create new EID
             } else {
-                throw new InvalidRequestException("The person with same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
+                throw new InvalidRequestException(
+                        "The person with same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
             }
-        } else if (myPractitionerDao.getContext().getResourceDefinition(theResource).getName().equals("Practitioner")) {
-            System.out.println("This is practitioner resource");
         }
-               
-        System.out.println("EIXT  : resourcePreCreate()");
+        //System.out.println("EIXT  : resourcePreCreate()");
     }
-    
 
     @Override
     public void resourceCreated(RequestDetails theRequest, IBaseResource theResource) {
-        System.out.println("ENTER : resourceCreated()");
+        //System.out.println("ENTER : resourceCreated()");
 
         if (myPatientDao.getContext().getResourceDefinition(theResource).getName().equals("Patient")) {
-            System.out.println("This is patient resource");
-            
-            Patient thePatient = (Patient)theResource;
-            // Step 1: 
-            System.out.println("Step 1: Get matched person list.");
-            List<IBaseResource> getMatchedPersonList = getMatchedPerson(thePatient);
-            int size = getMatchedPersonList.size();
-            
+
+            Patient thePatient = (Patient) theResource;
+            // -- Get matched person list.
+            List<IBaseResource> matchedPersonList = getMatchedPerson(thePatient);
+            int size = matchedPersonList.size();
+
             if (size == 0) {
-                System.out.println("Found zero -- create a Person with same name, birthdate");
-                createPersonFromPatient(thePatient);                
+                // No Person with same name and birth date found from this
+                // patient.
+                // create the Person, and linked the patient to the person
+                createPersonFromPatient(thePatient);
             } else if (size == 1) {
-                System.out.println("Found one");
-                Person theMatchedPerson = (Person)getMatchedPersonList.get(0);
+                // Found one person with same name and birth date.
+                // link the patient to the person
+                Person theMatchedPerson = (Person) matchedPersonList.get(0);
                 linkPatientToThePerson(thePatient, theMatchedPerson);
             } else {
-                System.out.println("Found multiple matched Person, something wrong.");
+                // Found multiple person with same name and birth date,
+                // something wrong
+                throw new InvalidRequestException("Found multiple matched person with same name:" + thePatient.getNameFirstRep().getNameAsSingleString() + " and birthdate:"
+                        + thePatient.getBirthDateElement().getValueAsString());
             }
-        } else  if (myPersonDao.getContext().getResourceDefinition(theResource).getName().equals("Person")) {
-            System.out.println("This is person resource");
-        } else if (myPractitionerDao.getContext().getResourceDefinition(theResource).getName().equals("Practitioner")) {
-            System.out.println("This is practitioner resource");
-        }
-      
-        System.out.println("EIXT  : resourceCreated()");
+        } 
+
+        //System.out.println("EIXT  : resourceCreated()");
     }
 
     @Override
     public void resourcePreUpdate(RequestDetails theRequest, IBaseResource theOldResource, IBaseResource theNewResource) {
-        System.out.println("ENTER : resourcePreUpdate()");
-        
-        if (myPatientDao.getContext().getResourceDefinition(theNewResource).getName().equals("Patient")) {
-            System.out.println("This is patient resource");
+        //System.out.println("ENTER : resourcePreUpdate()");
+
+        if (myPersonDao.getContext().getResourceDefinition(theNewResource).getName().equals("Person")) {
             
-        } else  if (myPersonDao.getContext().getResourceDefinition(theNewResource).getName().equals("Person")) {
-            System.out.println("This is person resource");
-            Person theOldPerson = (Person)theOldResource;            
-            System.out.println("Reference = " + theOldPerson.getLinkFirstRep().getTarget().getReference());
-            
-            Person theNewPerson = (Person)theNewResource;            
-            System.out.println("Reference = " + theNewPerson.getLinkFirstRep().getTarget().getReference());
-            
-        } else if (myPractitionerDao.getContext().getResourceDefinition(theNewResource).getName().equals("Practitioner")) {
-            System.out.println("This is practitioner resource");
+            // 1. if the new person has EID, do nothing
+            Person theNewPerson = (Person) theNewResource;
+            if (getEid(theNewPerson) != null)
+                return;
+
+            // 2. otherwise, copy the EID from old resource
+            Person theOldPerson = (Person) theOldResource;
+            String theOldEid = getEid(theOldPerson);
+            if (theOldEid != null) {
+                // found theOidEid, inject the old Eid to the new patient
+                injectEid(theNewPerson, theOldEid);
+                return;
+            }
+
+            // 3. create new EID if there is no EID from old resource
+            injectEid(theNewPerson, null); // inject new EID            
         }
         
-        System.out.println("EIXT  : resourcePreUpdate()");
-    }
-    
-    @Override
-    public void resourceUpdated(RequestDetails theRequest, IBaseResource theOldResource, IBaseResource theNewResource) {
-        System.out.println("ENTER : resourceUpdated()");
-        
-        if (myPatientDao.getContext().getResourceDefinition(theNewResource).getName().equals("Patient")) {
-            System.out.println("This is patient resource");
-            
-        } else  if (myPersonDao.getContext().getResourceDefinition(theNewResource).getName().equals("Person")) {
-            System.out.println("This is person resource");
-            Person theOldPerson = (Person)theOldResource;            
-            System.out.println("Reference = " + theOldPerson.getLinkFirstRep().getTarget().getReference());
-            
-            Person theNewPerson = (Person)theNewResource;            
-            System.out.println("Reference = " + theNewPerson.getLinkFirstRep().getTarget().getReference());
-            System.out.println("Reference = " + theNewPerson.getLinkFirstRep().getTarget().getDisplay());
-            
-        } else if (myPractitionerDao.getContext().getResourceDefinition(theNewResource).getName().equals("Practitioner")) {
-            System.out.println("This is practitioner resource");
-        }
-        
-        System.out.println("EIXT  : resourceUpdated()");
+        //System.out.println("EIXT  : resourcePreUpdate()");
     }
 
-    // TODO need to make it configurable
+    @Override
+    public void resourceUpdated(RequestDetails theRequest, IBaseResource theOldResource, IBaseResource theNewResource) {
+        //System.out.println("ENTER : resourceUpdated()");
+
+        if (myPatientDao.getContext().getResourceDefinition(theNewResource).getName().equals("Patient")) {
+            
+            Patient thePatient = (Patient) theNewResource;
+            // -- Get matched person list.
+            List<IBaseResource> personList = getPersonByPatientId(thePatient.getId());
+            int size = personList.size();
+
+            if (size == 0) {
+                // The Patient is not linked to and Person
+                // create the Person, and linked the patient to the person
+                createPersonFromPatient(thePatient);
+            } else if (size == 1) {
+                // Found one person with linked to this Patient.
+                // do nothing
+                return; 
+            } else {
+                // Found multiple person linked to this Patient,
+                // something wrong
+                throw new InvalidRequestException("Found multiple matched person linked to the patinet : " + thePatient.getId());
+            }
+
+        } 
+        
+        //System.out.println("EIXT  : resourceUpdated()");
+    }
+
     private List<IBaseResource> getMatchedPerson(Patient thePatient) {
 
         HumanName name = thePatient.getNameFirstRep();
@@ -207,12 +213,26 @@ public class EidEmpiInterceptorR4 extends ServerOperationInterceptorAdapter {
         StringAndListParam theNameParams = new StringAndListParam();
         StringParam lastNameParam = new StringParam(lastName, true);
         StringParam firstNameParam = new StringParam(firstName, true);
-        
+
         theNameParams.addAnd(new StringOrListParam().addOr(lastNameParam).addOr(firstNameParam));
-        
+
         SearchParameterMap theParams = new SearchParameterMap();
         theParams.add(Person.SP_NAME, theNameParams);
         theParams.add(Person.SP_BIRTHDATE, new DateParam(birthDate));
+        theParams.setLoadSynchronousUpTo(10);
+
+        IBundleProvider provider = myPersonDao.search(theParams);
+        List<IBaseResource> theOtherPatientList = provider.getResources(0, provider.size());
+
+        return theOtherPatientList;
+    }
+
+    private List<IBaseResource> getPersonByPatientId(String patientId) {
+
+        SearchParameterMap theParams = new SearchParameterMap();
+        ReferenceParam refParam = new ReferenceParam();
+        refParam.setValue(patientId);
+        theParams.add(Person.SP_LINK, refParam);        
         theParams.setLoadSynchronousUpTo(10);
 
         IBundleProvider provider = myPersonDao.search(theParams);
@@ -231,78 +251,101 @@ public class EidEmpiInterceptorR4 extends ServerOperationInterceptorAdapter {
         if (StringUtils.isBlank(lastName) || StringUtils.isBlank(firstName) || StringUtils.isBlank(birthDate)) {
             return Collections.<IBaseResource>emptyList();
         }
-        
+
         // Perform the search
         StringAndListParam theNameParams = new StringAndListParam();
         StringParam lastNameParam = new StringParam(lastName, true);
         StringParam firstNameParam = new StringParam(firstName, true);
-        
+
         theNameParams.addAnd(new StringOrListParam().addOr(lastNameParam).addOr(firstNameParam));
-        
+
         SearchParameterMap theParams = new SearchParameterMap();
         theParams.add(Person.SP_NAME, theNameParams);
         theParams.add(Person.SP_BIRTHDATE, new DateParam(birthDate));
         theParams.setLoadSynchronousUpTo(10);
-               
+
         IBundleProvider provider = myPersonDao.search(theParams);
         List<IBaseResource> theOtherPatientList = provider.getResources(0, provider.size());
 
         return theOtherPatientList;
     }
-    
+
     private IIdType createPersonFromPatient(Patient thePatient) {
 
         String thePatientId = thePatient.getId();
-        
+
         Person thePerson = new Person();
         thePerson.addName(thePatient.getNameFirstRep());
         thePerson.setBirthDate(thePatient.getBirthDateElement().getValue());
-        
+
         Identifier theEid = thePerson.addIdentifier();
         theEid.setSystem(myEnterpriseIdentifierSystem);
         theEid.setValue(UUID.randomUUID().toString());
-        
+
         PersonLinkComponent plc = thePerson.addLink();
-        Reference target =  plc.getTarget();
+        Reference target = plc.getTarget();
         target.setReference(thePatientId);
-        
+
         String lastName = thePatient.getNameFirstRep().getFamily();
         String firstName = thePatient.getNameFirstRep().getGivenAsSingleString();
-        
+
         target.setDisplay(lastName + ", " + firstName);
         plc.setTarget(target);
-               
-        DaoMethodOutcome createdPerson =  myPersonDao.create(thePerson);
-       
+
+        DaoMethodOutcome createdPerson = myPersonDao.create(thePerson);
+
         return createdPerson.getId();
     }
 
     private void linkPatientToThePerson(Patient thePatient, Person thePerson) {
-        
-        System.out.println("ENTER : linkPatientToThePerson()");
+
         String thePatientId = thePatient.getId();
-        
+
         PersonLinkComponent plc = thePerson.addLink();
-        Reference target =  new Reference();
+        Reference target = new Reference();
         target.setReference(thePatientId);
-        
+
         String lastName = thePatient.getNameFirstRep().getFamily();
         String firstName = thePatient.getNameFirstRep().getGivenAsSingleString();
-        
+
         target.setDisplay(lastName + ", " + firstName);
         plc.setTarget(target);
-               
+
         myPersonDao.update(thePerson);
-        
-        System.out.println("EXIT  : linkPatientToThePerson()");
+
         return;
     }
-    
-    private void injectEid(Person thePerson) {
 
-        Identifier theEid = thePerson.addIdentifier();
-        theEid.setSystem(myEnterpriseIdentifierSystem);
-        theEid.setValue(UUID.randomUUID().toString());
+    private void injectEid(Person thePerson, String eid) {
 
+        // injectEid if it does not exists
+        if (getEid(thePerson) == null) {
+            Identifier theEid = thePerson.addIdentifier();
+            theEid.setSystem(myEnterpriseIdentifierSystem);
+            if (eid == null)
+                theEid.setValue(UUID.randomUUID().toString());
+            else
+                theEid.setValue(eid);
+        }
     }
+
+    private String getEid(Person thePerson) {
+
+        List<Identifier> identifierList = thePerson.getIdentifier();
+        String eid;
+        for (Identifier identifier : identifierList) {
+
+            if (!myEnterpriseIdentifierSystem.equals(identifier.getSystem()))
+                continue;
+
+            eid = identifier.getValue();
+            if (eid == null)
+                continue;
+
+            return eid;
+        }
+
+        return null;
+    }
+
 }
