@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Validate;
+import org.hl7.fhir.instance.model.api.IBaseCoding;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.HumanName;
@@ -67,13 +68,19 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
     private IFhirResourceDao<Practitioner> myPractitionerDao;
 
     private String myEnterpriseIdentifierSystem;
+    private String myTagSystem;
 
-    public EmpiEidInterceptorR4(String theMasterPatientIndexSystem) {
+    public EmpiEidInterceptorR4(String theEnterpriseIdentifierSystem, String theTagSystem) {
         super();
 
-        Validate.notBlank(theMasterPatientIndexSystem);
-        ourLog.info("EMPI system {}.", myEnterpriseIdentifierSystem);
-        this.myEnterpriseIdentifierSystem = theMasterPatientIndexSystem;
+        Validate.notBlank(theEnterpriseIdentifierSystem);
+        Validate.notBlank(theTagSystem);
+        
+        ourLog.info("theEnterpriseIdentifierSystem={}.", theEnterpriseIdentifierSystem);        
+        this.myEnterpriseIdentifierSystem = theEnterpriseIdentifierSystem;
+        
+        ourLog.info("theTagSystem={}.", theTagSystem);
+        this.myTagSystem = theTagSystem;
     }
 
     public void setMyPatientDao(IFhirResourceDao<Patient> myPatientDao) {
@@ -90,23 +97,27 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
     @Override
     public void resourcePreCreate(RequestDetails theRequest, IBaseResource theResource) {
-        //System.out.println("ENTER : resourcePreCreate()");
 
         if (myPersonDao.getContext().getResourceDefinition(theResource).getName().equals("Person")) {
             
             // Duplicate check
             Person thePerson = (Person) theResource;
-            List<IBaseResource> getMatchedPersonList = getMatchedPerson(theRequest, thePerson);
-            int size = getMatchedPersonList.size();
+            List<IBaseResource> matchedPersonList = getMatchedPerson(thePerson);
+            int size = matchedPersonList.size();
 
             if (size == 0) {
                 injectEid(thePerson, null); // create new EID
             } else {
-                throw new InvalidRequestException(
-                        "The person with same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
+                injectTag(thePerson, "dupPerson", "Same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
+            }
+            
+            //-- inject the tag for all matched person
+            for (IBaseResource matchedResouce : matchedPersonList) {
+                Person matchedPerson = (Person)matchedResouce;
+                injectTag(matchedPerson, "dupPerson", "Same name:" + matchedPerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + matchedPerson.getBirthDateElement().getValueAsString()); 
+                myPersonDao.update(matchedPerson);
             }
         }
-        //System.out.println("EIXT  : resourcePreCreate()");
     }
 
     @Override
@@ -241,7 +252,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         return theOtherPatientList;
     }
     
-    private List<IBaseResource> getMatchedPerson(RequestDetails theRequest, Person thePerson) {
+    private List<IBaseResource> getMatchedPerson(Person thePerson) {
 
         HumanName name = thePerson.getNameFirstRep();
 
@@ -329,6 +340,14 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         }
     }
 
+    private void injectTag(IBaseResource theResource, String theTagCode, String theTagDisplay) {
+
+        IBaseCoding theTag = theResource.getMeta().addTag();
+        theTag.setSystem(myTagSystem);
+        theTag.setCode(theTagCode);
+        theTag.setDisplay(theTagDisplay);
+    }
+    
     private String getEid(Person thePerson) {
 
         List<Identifier> identifierList = thePerson.getIdentifier();

@@ -2,11 +2,11 @@ package ca.uhn.fhir.jpa.empi;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.fail;
 
 import java.util.List;
 
 import org.hl7.fhir.instance.model.api.IBaseResource;
+import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Person;
 import org.junit.After;
@@ -23,16 +23,16 @@ import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
 import ca.uhn.fhir.rest.param.NumberParam;
 import ca.uhn.fhir.rest.param.ReferenceParam;
-import ca.uhn.fhir.rest.server.exceptions.InvalidRequestException;
 import ca.uhn.fhir.util.TestUtil;
 
 public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
 
     private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EmpiEidInterceptorR4Test.class);
 
-    private static final String ENTERPRISE_IDENTIFIER = "http://hapi.fhir.org/enterprise-identifier";
+    private static final String ENTERPRISE_IDENTIFIER_SYSTEM = "http://hapi.fhir.org/enterprise-identifier";
+    private static final String EMPI_TAG_SYSTEM = "http://hapi.fhir.org/empi-tag";
 
-    private EmpiEidInterceptorR4 myInterceptor = new EmpiEidInterceptorR4(ENTERPRISE_IDENTIFIER);
+    private EmpiEidInterceptorR4 myInterceptor = new EmpiEidInterceptorR4(ENTERPRISE_IDENTIFIER_SYSTEM, EMPI_TAG_SYSTEM);
 
     @Autowired
     @Qualifier("myPersonDaoR4")
@@ -67,7 +67,7 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         assertEquals("foo", createdPerson.getNameFirstRep().getFamily());
         
         // 2. verify EID is injected 
-        assertEquals(ENTERPRISE_IDENTIFIER, createdPerson.getIdentifierFirstRep().getSystem());       
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, createdPerson.getIdentifierFirstRep().getSystem());       
         assertNotNull(createdPerson.getIdentifierFirstRep().getValue());
         ourLog.debug(createdPerson.getId());
     }
@@ -83,12 +83,12 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
 
         MethodOutcome person1Outcome = myPersonDao.create(thePerson1);
         Person createdPerson1 = (Person) person1Outcome.getResource();
-                
+               
         // 1. verify the Person1 is created
         assertEquals("foo", createdPerson1.getNameFirstRep().getFamily());
         
         // 2. verify EID is injected 
-        assertEquals(ENTERPRISE_IDENTIFIER, createdPerson1.getIdentifierFirstRep().getSystem());       
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, createdPerson1.getIdentifierFirstRep().getSystem());       
         assertNotNull(createdPerson1.getIdentifierFirstRep().getValue());
         //System.out.println(createdPerson1.getId());
         
@@ -98,13 +98,27 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         thePerson2.getNameFirstRep().addGivenElement().setValue("bar");
         thePerson2.getBirthDateElement().setValueAsString("2000-01-01");
 
-        try {
-            myPersonDao.create(thePerson2, mySrd);
-            fail();
-        } catch (InvalidRequestException e) {
-            assertEquals("The person with same name:bar foo and birthdate:2000-01-01", e.getMessage());
-        }
+        MethodOutcome person2Outcome = myPersonDao.create(thePerson2, mySrd);
+        Person createdPerson2 = (Person) person2Outcome.getResource();
         
+        // 3. verify the dupTag is injected to the second person
+        Coding theTag = createdPerson2.getMeta().getTagFirstRep();
+        assertEquals(EMPI_TAG_SYSTEM, theTag.getSystem());
+        assertEquals("dupPerson", theTag.getCode());        
+        assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag.getDisplay());
+        
+        // 4. verify the dupTag is injected to the first person too
+        SearchParameterMap theParams = new SearchParameterMap();
+        theParams.add(Person.SP_RES_ID, new NumberParam(person1Outcome.getId().getIdPart()));
+        
+        IBundleProvider provider = myPersonDao.search(theParams);
+        List<IBaseResource> theOtherPatientList = provider.getResources(0, provider.size());
+        Person theUpdatedPerson = (Person)theOtherPatientList.get(0);
+        Coding theTag2 = theUpdatedPerson.getMeta().getTagFirstRep();
+        
+        assertEquals(EMPI_TAG_SYSTEM, theTag2.getSystem());
+        assertEquals("dupPerson", theTag2.getCode());        
+        assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag2.getDisplay());  
     }
     
     @Test
@@ -136,7 +150,7 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         assertEquals("foo", createdPerson.getNameFirstRep().getFamily());
         
         // 3. verify eid is created
-        assertEquals(ENTERPRISE_IDENTIFIER, createdPerson.getIdentifierFirstRep().getSystem());       
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, createdPerson.getIdentifierFirstRep().getSystem());       
         assertNotNull(createdPerson.getIdentifierFirstRep().getValue());
         
         // 4. verify they are linked
@@ -173,7 +187,7 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         assertEquals("foo", createdPatient.getNameFirstRep().getFamily());
         
         // 3. verify eid is created on the Person
-        assertEquals(ENTERPRISE_IDENTIFIER, createdPerson.getIdentifierFirstRep().getSystem());       
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, createdPerson.getIdentifierFirstRep().getSystem());       
         assertNotNull(createdPerson.getIdentifierFirstRep().getValue());
         
         // 4. verify they are linked
@@ -203,7 +217,7 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         assertEquals("foo", createdPerson.getNameFirstRep().getFamily());
        
         // 2. verify EID is injected 
-        assertEquals(ENTERPRISE_IDENTIFIER, createdPerson.getIdentifierFirstRep().getSystem());  
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, createdPerson.getIdentifierFirstRep().getSystem());  
         String eid = createdPerson.getIdentifierFirstRep().getValue();
         assertNotNull(eid);
      
@@ -220,7 +234,7 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         Person theUpdatedPerson = (Person)theOtherPatientList.get(0);
         
         assertEquals("smith", theUpdatedPerson.getNameFirstRep().getFamily());
-        assertEquals(ENTERPRISE_IDENTIFIER, theUpdatedPerson.getIdentifierFirstRep().getSystem());       
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, theUpdatedPerson.getIdentifierFirstRep().getSystem());       
         assertEquals(eid, theUpdatedPerson.getIdentifierFirstRep().getValue());
     }
     
@@ -253,7 +267,7 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         
         Person matchedPerson = (Person)theOtherPatientList.get(0);
                
-        assertEquals(ENTERPRISE_IDENTIFIER, matchedPerson.getIdentifierFirstRep().getSystem());       
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, matchedPerson.getIdentifierFirstRep().getSystem());       
         assertNotNull(matchedPerson.getIdentifierFirstRep().getValue());
     }
     
