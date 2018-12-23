@@ -55,9 +55,15 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
     private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EmpiEidInterceptorR4.class);
 
-    //-- TODO move to common place
+    // -- TODO move to common place
     public static final String TAG_DUP_PERSON = "dupPerson";
-    
+    public static final String TAG_FORCE_EID = "forceEid"; // When create a
+                                                           // Person, do not
+                                                           // search for the
+                                                           // matched person,
+                                                           // create eid that
+                                                           // person
+
     @Autowired
     @Qualifier("myPatientDaoR4")
     private IFhirResourceDao<Patient> myPatientDao;
@@ -78,10 +84,10 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
         Validate.notBlank(theEnterpriseIdentifierSystem);
         Validate.notBlank(theTagSystem);
-        
-        ourLog.info("theEnterpriseIdentifierSystem={}.", theEnterpriseIdentifierSystem);        
+
+        ourLog.info("theEnterpriseIdentifierSystem={}.", theEnterpriseIdentifierSystem);
         this.myEnterpriseIdentifierSystem = theEnterpriseIdentifierSystem;
-        
+
         ourLog.info("theTagSystem={}.", theTagSystem);
         this.myTagSystem = theTagSystem;
     }
@@ -102,24 +108,31 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
     public void resourcePreCreate(RequestDetails theRequest, IBaseResource theResource) {
 
         if (myPersonDao.getContext().getResourceDefinition(theResource).getName().equals("Person")) {
-            
-            // Duplicate check
-            Person thePerson = (Person) theResource;
-            List<IBaseResource> matchedPersonList = getMatchedPerson(thePerson);
-            int size = matchedPersonList.size();
 
-            if (size == 0) {
+            Person thePerson = (Person) theResource;
+            if (hasTag(thePerson, TAG_FORCE_EID)) {
+                // do the force eid logic
                 injectEid(thePerson, null); // create new EID
             } else {
-                injectTag(thePerson, TAG_DUP_PERSON, "Same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
-            }
-            
-            //-- inject the tag for all matched person
-            for (IBaseResource matchedResouce : matchedPersonList) {
-                Person matchedPerson = (Person)matchedResouce;
-                if (!hasTag(matchedPerson, TAG_DUP_PERSON)) {
-                    injectTag(matchedPerson, TAG_DUP_PERSON, "Same name:" + matchedPerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + matchedPerson.getBirthDateElement().getValueAsString()); 
-                    myPersonDao.update(matchedPerson);
+
+                // Duplicate check
+                List<IBaseResource> matchedPersonList = getMatchedPerson(thePerson);
+                int size = matchedPersonList.size();
+
+                if (size == 0) {
+                    injectEid(thePerson, null); // create new EID
+                } else {
+                    injectTag(thePerson, TAG_DUP_PERSON, "Same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
+                }
+
+                // -- inject the tag for all matched person
+                for (IBaseResource matchedResouce : matchedPersonList) {
+                    Person matchedPerson = (Person) matchedResouce;
+                    if (!hasTag(matchedPerson, TAG_DUP_PERSON)) {
+                        injectTag(matchedPerson, TAG_DUP_PERSON,
+                                "Same name:" + matchedPerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + matchedPerson.getBirthDateElement().getValueAsString());
+                        myPersonDao.update(matchedPerson);
+                    }
                 }
             }
         } else if (myPatientDao.getContext().getResourceDefinition(theResource).getName().equals("Patient")) {
@@ -129,18 +142,19 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             List<IBaseResource> matchedPersonList = getMatchedPerson(thePatient);
             int size = matchedPersonList.size();
 
-            //-- not very efficient, search the person twice, in precreate and created
-            //-- how do i pass the result over?
+            // -- not very efficient, search the person twice, in precreate and
+            // created
+            // -- how do i pass the result over?
             if (size > 1) {
                 // found multiple person, inject the tag on person
-                injectTag(thePatient, TAG_DUP_PERSON, "Same name:" + thePatient.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePatient.getBirthDateElement().getValueAsString()); 
+                injectTag(thePatient, TAG_DUP_PERSON, "Same name:" + thePatient.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePatient.getBirthDateElement().getValueAsString());
             }
         }
     }
 
     @Override
     public void resourceCreated(RequestDetails theRequest, IBaseResource theResource) {
-             
+
         if (myPatientDao.getContext().getResourceDefinition(theResource).getName().equals("Patient")) {
 
             Patient thePatient = (Patient) theResource;
@@ -161,15 +175,15 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             } else {
                 // do nothing, in the preCreated, the dup_person tag is injected
             }
-        } 
+        }
 
     }
 
     @Override
     public void resourcePreUpdate(RequestDetails theRequest, IBaseResource theOldResource, IBaseResource theNewResource) {
-       
+
         if (myPersonDao.getContext().getResourceDefinition(theNewResource).getName().equals("Person")) {
-            
+
             // 1. if the new person has EID, do nothing
             Person theNewPerson = (Person) theNewResource;
             if (getEid(theNewPerson) != null)
@@ -185,17 +199,16 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             }
 
             // 3. create new EID if there is no EID from old resource
-            injectEid(theNewPerson, null); // inject new EID            
+            injectEid(theNewPerson, null); // inject new EID
         }
-        
+
     }
 
     @Override
     public void resourceUpdated(RequestDetails theRequest, IBaseResource theOldResource, IBaseResource theNewResource) {
-        
-        
+
         if (myPatientDao.getContext().getResourceDefinition(theNewResource).getName().equals("Patient")) {
-            
+
             Patient thePatient = (Patient) theNewResource;
             // -- Get matched person list.
             List<IBaseResource> matchedPersonList = getPersonByPatientId(thePatient.getId());
@@ -208,14 +221,14 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             } else if (size == 1) {
                 // Found one person with linked to this Patient.
                 // do nothing
-                return; 
+                return;
             } else {
                 // Found multiple person linked to this Patient,
                 // something wrong
                 throw new UnprocessableEntityException("Found multiple matched person linked to the patinet : " + thePatient.getId());
             }
 
-        } 
+        }
     }
 
     private List<IBaseResource> getMatchedPerson(Patient thePatient) {
@@ -252,7 +265,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         SearchParameterMap theParams = new SearchParameterMap();
         ReferenceParam refParam = new ReferenceParam();
         refParam.setValue(patientId);
-        theParams.add(Person.SP_LINK, refParam);        
+        theParams.add(Person.SP_LINK, refParam);
         theParams.setLoadSynchronousUpTo(10);
 
         IBundleProvider provider = myPersonDao.search(theParams);
@@ -260,7 +273,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
         return theOtherPatientList;
     }
-    
+
     private List<IBaseResource> getMatchedPerson(Person thePerson) {
 
         HumanName name = thePerson.getNameFirstRep();
@@ -356,16 +369,15 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         theTag.setCode(theTagCode);
         theTag.setDisplay(theTagDisplay);
     }
-    
+
     private boolean hasTag(IBaseResource theResource, String theTagCode) {
 
         IBaseCoding theTag = theResource.getMeta().getTag(myTagSystem, theTagCode);
         if (theTag == null)
-           return false;
+            return false;
         return true;
     }
-    
-    
+
     private String getEid(Person thePerson) {
 
         List<Identifier> identifierList = thePerson.getIdentifier();

@@ -1,10 +1,12 @@
 package ca.uhn.fhir.jpa.empi;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 
 import java.util.List;
 
+import org.hl7.fhir.instance.model.api.IBaseCoding;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Patient;
@@ -122,6 +124,50 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
     }
     
 
+    @Test
+    //-- create two person with same name, and birth date with forceEidTag on the second person
+    public void testJpaCreateSamePersonWithForceEid() {
+
+        Person thePerson1 = new Person();
+        thePerson1.getNameFirstRep().setFamily("foo");
+        thePerson1.getNameFirstRep().addGivenElement().setValue("bar");
+        thePerson1.getBirthDateElement().setValueAsString("2000-01-01");
+
+        MethodOutcome person1Outcome = myPersonDao.create(thePerson1);
+        Person createdPerson1 = (Person) person1Outcome.getResource();
+               
+        // 1. verify the Person1 is created
+        assertEquals("foo", createdPerson1.getNameFirstRep().getFamily());
+        
+        // 2. verify EID is injected 
+        assertEquals(ENTERPRISE_IDENTIFIER_SYSTEM, createdPerson1.getIdentifierFirstRep().getSystem());       
+        assertNotNull(createdPerson1.getIdentifierFirstRep().getValue());
+        //System.out.println(createdPerson1.getId());
+        
+        //-- second person
+        Person thePerson2 = new Person();
+        thePerson2.getNameFirstRep().setFamily("foo");
+        thePerson2.getNameFirstRep().addGivenElement().setValue("bar");
+        thePerson2.getBirthDateElement().setValueAsString("2000-01-01");
+        
+        IBaseCoding t = thePerson2.getMeta().addTag();
+        t.setSystem(EMPI_TAG_SYSTEM);
+        t.setCode(EmpiEidInterceptorR4.TAG_FORCE_EID);        
+
+        MethodOutcome person2Outcome = myPersonDao.create(thePerson2, mySrd);
+        Person createdPerson2 = (Person) person2Outcome.getResource();
+        
+        // 3. verify the dupTag is injected to the second person
+        Coding theTag = createdPerson2.getMeta().getTagFirstRep();
+        assertEquals(EMPI_TAG_SYSTEM, theTag.getSystem());
+        assertEquals(EmpiEidInterceptorR4.TAG_FORCE_EID, theTag.getCode());        
+        
+        // 4. verify two eid is different
+        String firstEid = createdPerson1.getIdentifierFirstRep().getValue();
+        String secondEid = createdPerson2.getIdentifierFirstRep().getValue();
+        assertNotEquals(firstEid, secondEid);
+  
+    }
     
     @Test
     // -- Create a Patient, can't find matched Person
