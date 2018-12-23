@@ -117,9 +117,11 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         Coding theTag2 = theUpdatedPerson.getMeta().getTagFirstRep();
         
         assertEquals(EMPI_TAG_SYSTEM, theTag2.getSystem());
-        assertEquals("dupPerson", theTag2.getCode());        
+        assertEquals(EmpiEidInterceptorR4.TAG_DUP_PERSON, theTag2.getCode());        
         assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag2.getDisplay());  
     }
+    
+
     
     @Test
     // -- Create a Patient, can't find matched Person
@@ -201,6 +203,46 @@ public class EmpiEidInterceptorR4Test extends BaseJpaR4Test {
         assertEquals("Patient/"+patientOutcome.getId().getIdPart(), theUpdatedPerson.getLinkFirstRep().getTarget().getReference());        
     }
 
+    @Test
+    //-- create a patient, but there are two person with same name
+    public void testJpaCreatePatientWithTwoMatchedPerson() {
+
+        // 1. create first person
+        Person thePerson1 = new Person();
+        thePerson1.getNameFirstRep().setFamily("foo");
+        thePerson1.getNameFirstRep().addGivenElement().setValue("bar");
+        thePerson1.getBirthDateElement().setValueAsString("2000-01-01");
+        MethodOutcome person1Outcome = myPersonDao.create(thePerson1);
+        Person createdPerson1 = (Person) person1Outcome.getResource();
+        assertEquals("foo", createdPerson1.getNameFirstRep().getFamily());
+                            
+        //2. create the second person
+        Person thePerson2 = new Person();
+        thePerson2.getNameFirstRep().setFamily("foo");
+        thePerson2.getNameFirstRep().addGivenElement().setValue("bar");
+        thePerson2.getBirthDateElement().setValueAsString("2000-01-01");
+
+        MethodOutcome person2Outcome = myPersonDao.create(thePerson2, mySrd);
+        Person createdPerson2 = (Person) person2Outcome.getResource();
+        assertEquals("foo", createdPerson2.getNameFirstRep().getFamily());
+        
+        // 3. create the Patient
+        Patient thePatient = new Patient();
+        thePatient.getNameFirstRep().setFamily("foo");
+        thePatient.getNameFirstRep().addGivenElement().setValue("bar");
+        thePatient.getBirthDateElement().setValueAsString("2000-01-01");
+
+        MethodOutcome patientOutcome = myPatientDao.create(thePatient);
+        Patient createdPatient = (Patient) patientOutcome.getResource();
+        
+        Coding theTag = createdPatient.getMeta().getTagFirstRep();
+        
+        //-- verify the tag is create on the patient
+        assertEquals(EMPI_TAG_SYSTEM, theTag.getSystem());
+        assertEquals(EmpiEidInterceptorR4.TAG_DUP_PERSON, theTag.getCode());        
+        assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag.getDisplay());         
+    }
+    
     @Test
     //-- updated existing Person, the old person with EID
     public void testJpaUpdatePerson() {

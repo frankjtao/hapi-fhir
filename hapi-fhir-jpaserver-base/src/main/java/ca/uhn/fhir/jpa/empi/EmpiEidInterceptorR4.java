@@ -29,7 +29,7 @@ import ca.uhn.fhir.rest.param.ReferenceParam;
 import ca.uhn.fhir.rest.param.StringAndListParam;
 import ca.uhn.fhir.rest.param.StringOrListParam;
 import ca.uhn.fhir.rest.param.StringParam;
-import ca.uhn.fhir.rest.server.exceptions.InvalidRequestException;
+import ca.uhn.fhir.rest.server.exceptions.UnprocessableEntityException;
 import ca.uhn.fhir.rest.server.interceptor.ServerOperationInterceptorAdapter;
 
 /*
@@ -55,6 +55,9 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
     private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EmpiEidInterceptorR4.class);
 
+    //-- TODO move to common place
+    public static final String TAG_DUP_PERSON = "dupPerson";
+    
     @Autowired
     @Qualifier("myPatientDaoR4")
     private IFhirResourceDao<Patient> myPatientDao;
@@ -108,22 +111,36 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             if (size == 0) {
                 injectEid(thePerson, null); // create new EID
             } else {
-                injectTag(thePerson, "dupPerson", "Same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
+                injectTag(thePerson, TAG_DUP_PERSON, "Same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
             }
             
             //-- inject the tag for all matched person
             for (IBaseResource matchedResouce : matchedPersonList) {
                 Person matchedPerson = (Person)matchedResouce;
-                injectTag(matchedPerson, "dupPerson", "Same name:" + matchedPerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + matchedPerson.getBirthDateElement().getValueAsString()); 
-                myPersonDao.update(matchedPerson);
+                if (!hasTag(matchedPerson, TAG_DUP_PERSON)) {
+                    injectTag(matchedPerson, TAG_DUP_PERSON, "Same name:" + matchedPerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + matchedPerson.getBirthDateElement().getValueAsString()); 
+                    myPersonDao.update(matchedPerson);
+                }
+            }
+        } else if (myPatientDao.getContext().getResourceDefinition(theResource).getName().equals("Patient")) {
+
+            Patient thePatient = (Patient) theResource;
+            // -- Get matched person list.
+            List<IBaseResource> matchedPersonList = getMatchedPerson(thePatient);
+            int size = matchedPersonList.size();
+
+            //-- not very efficient, search the person twice, in precreate and created
+            //-- how do i pass the result over?
+            if (size > 1) {
+                // found multiple person, inject the tag on person
+                injectTag(thePatient, TAG_DUP_PERSON, "Same name:" + thePatient.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePatient.getBirthDateElement().getValueAsString()); 
             }
         }
     }
 
     @Override
     public void resourceCreated(RequestDetails theRequest, IBaseResource theResource) {
-        //System.out.println("ENTER : resourceCreated()");
-
+             
         if (myPatientDao.getContext().getResourceDefinition(theResource).getName().equals("Patient")) {
 
             Patient thePatient = (Patient) theResource;
@@ -142,20 +159,15 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
                 Person theMatchedPerson = (Person) matchedPersonList.get(0);
                 linkPatientToThePerson(thePatient, theMatchedPerson);
             } else {
-                // Found multiple person with same name and birth date,
-                // something wrong
-                throw new InvalidRequestException("Found multiple matched person with same name:" + thePatient.getNameFirstRep().getNameAsSingleString() + " and birthdate:"
-                        + thePatient.getBirthDateElement().getValueAsString());
+                // do nothing, in the preCreated, the dup_person tag is injected
             }
         } 
 
-        //System.out.println("EIXT  : resourceCreated()");
     }
 
     @Override
     public void resourcePreUpdate(RequestDetails theRequest, IBaseResource theOldResource, IBaseResource theNewResource) {
-        //System.out.println("ENTER : resourcePreUpdate()");
-
+       
         if (myPersonDao.getContext().getResourceDefinition(theNewResource).getName().equals("Person")) {
             
             // 1. if the new person has EID, do nothing
@@ -176,19 +188,18 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             injectEid(theNewPerson, null); // inject new EID            
         }
         
-        //System.out.println("EIXT  : resourcePreUpdate()");
     }
 
     @Override
     public void resourceUpdated(RequestDetails theRequest, IBaseResource theOldResource, IBaseResource theNewResource) {
-        //System.out.println("ENTER : resourceUpdated()");
-
+        
+        
         if (myPatientDao.getContext().getResourceDefinition(theNewResource).getName().equals("Patient")) {
             
             Patient thePatient = (Patient) theNewResource;
             // -- Get matched person list.
-            List<IBaseResource> personList = getPersonByPatientId(thePatient.getId());
-            int size = personList.size();
+            List<IBaseResource> matchedPersonList = getPersonByPatientId(thePatient.getId());
+            int size = matchedPersonList.size();
 
             if (size == 0) {
                 // The Patient is not linked to and Person
@@ -201,12 +212,10 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             } else {
                 // Found multiple person linked to this Patient,
                 // something wrong
-                throw new InvalidRequestException("Found multiple matched person linked to the patinet : " + thePatient.getId());
+                throw new UnprocessableEntityException("Found multiple matched person linked to the patinet : " + thePatient.getId());
             }
 
         } 
-        
-        //System.out.println("EIXT  : resourceUpdated()");
     }
 
     private List<IBaseResource> getMatchedPerson(Patient thePatient) {
@@ -347,6 +356,15 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         theTag.setCode(theTagCode);
         theTag.setDisplay(theTagDisplay);
     }
+    
+    private boolean hasTag(IBaseResource theResource, String theTagCode) {
+
+        IBaseCoding theTag = theResource.getMeta().getTag(myTagSystem, theTagCode);
+        if (theTag == null)
+           return false;
+        return true;
+    }
+    
     
     private String getEid(Person thePerson) {
 
