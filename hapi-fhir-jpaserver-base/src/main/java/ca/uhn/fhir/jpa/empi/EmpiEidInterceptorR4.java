@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Validate;
+import org.hl7.fhir.instance.model.Conformance.SearchModifierCode;
 import org.hl7.fhir.instance.model.api.IBaseCoding;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.instance.model.api.IIdType;
@@ -16,8 +17,11 @@ import org.hl7.fhir.r4.model.Person;
 import org.hl7.fhir.r4.model.Person.PersonLinkComponent;
 import org.hl7.fhir.r4.model.Practitioner;
 import org.hl7.fhir.r4.model.Reference;
+import org.hl7.fhir.utilities.json.JSONUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+
+import com.google.gson.JsonObject;
 
 import ca.uhn.fhir.jpa.dao.DaoMethodOutcome;
 import ca.uhn.fhir.jpa.dao.IFhirResourceDao;
@@ -29,6 +33,7 @@ import ca.uhn.fhir.rest.param.ReferenceParam;
 import ca.uhn.fhir.rest.param.StringAndListParam;
 import ca.uhn.fhir.rest.param.StringOrListParam;
 import ca.uhn.fhir.rest.param.StringParam;
+import ca.uhn.fhir.rest.param.TokenParam;
 import ca.uhn.fhir.rest.server.exceptions.UnprocessableEntityException;
 import ca.uhn.fhir.rest.server.interceptor.ServerOperationInterceptorAdapter;
 
@@ -57,12 +62,9 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
     // -- TODO move to common place
     public static final String TAG_DUP_PERSON = "dupPerson";
-    public static final String TAG_FORCE_EID = "forceEid"; // When create a
-                                                           // Person, do not
-                                                           // search for the
-                                                           // matched person,
-                                                           // create eid that
-                                                           // person
+    // When create a Person, do not search for the matched person, create eid
+    // that person
+    public static final String TAG_FORCE_EID = "forceEid";
 
     @Autowired
     @Qualifier("myPatientDaoR4")
@@ -79,17 +81,27 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
     private String myEnterpriseIdentifierSystem;
     private String myTagSystem;
 
-    public EmpiEidInterceptorR4(String theEnterpriseIdentifierSystem, String theTagSystem) {
+    private String myMatchPersonName;
+    private String myMatchPersonBirthDate;
+    private String myMatchPersonGender;
+
+    // {"Person":{"name":true,"birthdate":true}}
+    public EmpiEidInterceptorR4(String theEnterpriseIdentifierSystem, String theTagSystem, String theMatchCriteria) {
         super();
 
         Validate.notBlank(theEnterpriseIdentifierSystem);
         Validate.notBlank(theTagSystem);
+        Validate.notBlank(theMatchCriteria);
 
         ourLog.info("theEnterpriseIdentifierSystem={}.", theEnterpriseIdentifierSystem);
         this.myEnterpriseIdentifierSystem = theEnterpriseIdentifierSystem;
 
         ourLog.info("theTagSystem={}.", theTagSystem);
         this.myTagSystem = theTagSystem;
+
+        ourLog.info("thePersonMatchJsonString={}.", theMatchCriteria);
+        parseMatchCriteria(theMatchCriteria);
+
     }
 
     public void setMyPatientDao(IFhirResourceDao<Patient> myPatientDao) {
@@ -162,6 +174,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             List<IBaseResource> matchedPersonList = getMatchedPerson(thePatient);
             int size = matchedPersonList.size();
 
+            System.out.println("size = " + size);
             if (size == 0) {
                 // No Person with same name and birth date found from this
                 // patient.
@@ -231,35 +244,6 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         }
     }
 
-    private List<IBaseResource> getMatchedPerson(Patient thePatient) {
-
-        HumanName name = thePatient.getNameFirstRep();
-
-        String lastName = name.getFamily();
-        String firstName = name.getGivenAsSingleString();
-        String birthDate = thePatient.getBirthDateElement().asStringValue();
-        if (StringUtils.isBlank(lastName) || StringUtils.isBlank(firstName) || StringUtils.isBlank(birthDate)) {
-            return Collections.<IBaseResource>emptyList();
-        }
-
-        // Perform the search
-        StringAndListParam theNameParams = new StringAndListParam();
-        StringParam lastNameParam = new StringParam(lastName, true);
-        StringParam firstNameParam = new StringParam(firstName, true);
-
-        theNameParams.addAnd(new StringOrListParam().addOr(lastNameParam).addOr(firstNameParam));
-
-        SearchParameterMap theParams = new SearchParameterMap();
-        theParams.add(Person.SP_NAME, theNameParams);
-        theParams.add(Person.SP_BIRTHDATE, new DateParam(birthDate));
-        theParams.setLoadSynchronousUpTo(10);
-
-        IBundleProvider provider = myPersonDao.search(theParams);
-        List<IBaseResource> theOtherPatientList = provider.getResources(0, provider.size());
-
-        return theOtherPatientList;
-    }
-
     private List<IBaseResource> getPersonByPatientId(String patientId) {
 
         SearchParameterMap theParams = new SearchParameterMap();
@@ -274,28 +258,40 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         return theOtherPatientList;
     }
 
-    private List<IBaseResource> getMatchedPerson(Person thePerson) {
-
-        HumanName name = thePerson.getNameFirstRep();
-
-        String lastName = name.getFamily();
-        String firstName = name.getGivenAsSingleString();
-        String birthDate = thePerson.getBirthDateElement().asStringValue();
-        if (StringUtils.isBlank(lastName) || StringUtils.isBlank(firstName) || StringUtils.isBlank(birthDate)) {
-            return Collections.<IBaseResource>emptyList();
-        }
-
-        // Perform the search
-        StringAndListParam theNameParams = new StringAndListParam();
-        StringParam lastNameParam = new StringParam(lastName, true);
-        StringParam firstNameParam = new StringParam(firstName, true);
-
-        theNameParams.addAnd(new StringOrListParam().addOr(lastNameParam).addOr(firstNameParam));
+    // -- NOTE: if the search parameter values are missing, it's a not match
+    private List<IBaseResource> getMatchedPerson(IBaseResource theResource) {
 
         SearchParameterMap theParams = new SearchParameterMap();
-        theParams.add(Person.SP_NAME, theNameParams);
-        theParams.add(Person.SP_BIRTHDATE, new DateParam(birthDate));
         theParams.setLoadSynchronousUpTo(10);
+
+        // -- name
+        if (StringUtils.isNotEmpty(myMatchPersonName)) {
+
+            StringAndListParam theNameParams = getName(theResource);
+            if (theNameParams != null)
+                theParams.add(Person.SP_NAME, theNameParams);
+            else
+                return Collections.<IBaseResource>emptyList();
+
+            theParams.add(Person.SP_NAME, theNameParams);
+        }
+
+        // only support EQ, the other is ignored
+        if (StringUtils.isNotEmpty(myMatchPersonBirthDate)) {
+            DateParam birthDate = getBirthDate(theResource);
+            if (birthDate != null)
+                theParams.add(Person.SP_BIRTHDATE, birthDate);
+            else
+                return Collections.<IBaseResource>emptyList();
+        }
+
+        if (StringUtils.isNotEmpty(myMatchPersonGender)) { // only exact match
+            TokenParam theGender = getGender(theResource);
+            if (theGender != null)
+                theParams.add(Person.SP_GENDER, theGender);
+            else
+                return Collections.<IBaseResource>emptyList();
+        }
 
         IBundleProvider provider = myPersonDao.search(theParams);
         List<IBaseResource> theOtherPatientList = provider.getResources(0, provider.size());
@@ -397,4 +393,109 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         return null;
     }
 
+    private void parseMatchCriteria(String theMatchJsonString) {
+
+        JsonObject myMatchCriteria = JSONUtil.parse(theMatchJsonString);
+
+        JsonObject thePersonMatchCriteria = myMatchCriteria.get("Person").getAsJsonObject();
+        if (thePersonMatchCriteria != null) {
+            if (thePersonMatchCriteria.has(Person.SP_NAME)) {
+                myMatchPersonName = thePersonMatchCriteria.get(Person.SP_NAME).getAsString();
+            }
+            if (thePersonMatchCriteria.has(Person.SP_BIRTHDATE)) {
+                myMatchPersonBirthDate = thePersonMatchCriteria.get(Person.SP_BIRTHDATE).getAsString();
+
+            }
+            if (thePersonMatchCriteria.has(Person.SP_GENDER)) {
+                myMatchPersonGender = thePersonMatchCriteria.get(Person.SP_GENDER).getAsString();
+
+            }
+        }
+    }
+
+    private StringAndListParam getName(IBaseResource theResource) {
+
+        String lastName = getLastName(theResource);
+        String firstName = getFirstName(theResource);
+
+        if (StringUtils.isEmpty(lastName) || StringUtils.isEmpty(firstName))
+            return null;
+
+        StringAndListParam theNameParams = new StringAndListParam();
+        if (SearchModifierCode.EXACT.toString().equalsIgnoreCase(myMatchPersonName)) {
+            return theNameParams.addAnd(new StringOrListParam().addOr(new StringParam(lastName, true)).addOr(new StringParam(firstName, true)));
+        } else {
+            return theNameParams.addAnd(new StringOrListParam().addOr(new StringParam(lastName, false)).addOr(new StringParam(firstName, false)));
+        }
+
+    }
+
+    private String getLastName(IBaseResource theResource) {
+
+        if (theResource instanceof Person) {
+            Person thePerson = (Person) theResource;
+            HumanName name = thePerson.getNameFirstRep();
+            return name.getFamily();
+        } else if (theResource instanceof Patient) {
+            Patient thePatient = (Patient) theResource;
+            HumanName name = thePatient.getNameFirstRep();
+            return name.getFamily();
+        }
+
+        return null;
+    }
+
+    private String getFirstName(IBaseResource theResource) {
+
+        if (theResource instanceof Person) {
+            Person thePerson = (Person) theResource;
+            HumanName name = thePerson.getNameFirstRep();
+            return name.getGivenAsSingleString();
+        } else if (theResource instanceof Patient) {
+            Patient thePatient = (Patient) theResource;
+            HumanName name = thePatient.getNameFirstRep();
+            return name.getGivenAsSingleString();
+        }
+
+        return null;
+    }
+
+    private DateParam getBirthDate(IBaseResource theResource) {
+
+        if (theResource instanceof Person) {
+            Person thePerson = (Person) theResource;
+            if (thePerson.hasBirthDate())
+                return new DateParam(thePerson.getBirthDateElement().asStringValue());
+            else
+                return null;
+        } else if (theResource instanceof Patient) {
+            Patient thePatient = (Patient) theResource;
+            if (thePatient.hasBirthDate())
+                return new DateParam(thePatient.getBirthDateElement().asStringValue());
+            else
+                return null;
+        }
+
+        return null;
+    }
+
+    private TokenParam getGender(IBaseResource theResource) {
+
+        TokenParam theGenderToken;
+        if (theResource instanceof Person) {
+            Person thePerson = (Person) theResource;
+            if (thePerson.hasGender()) {
+                theGenderToken = new TokenParam(thePerson.getGender().getSystem(), thePerson.getGender().toCode());
+                return theGenderToken;
+            }
+        } else if (theResource instanceof Patient) {
+            Patient thePatient = (Patient) theResource;
+            if (thePatient.hasGender()) {
+                theGenderToken = new TokenParam(thePatient.getGender().getSystem(), thePatient.getGender().toCode());
+                return theGenderToken;
+            }
+        }
+
+        return null;
+    }
 }
