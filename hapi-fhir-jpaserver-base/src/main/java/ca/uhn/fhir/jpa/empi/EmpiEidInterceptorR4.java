@@ -85,7 +85,6 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
     private String myMatchPersonBirthDate;
     private String myMatchPersonGender;
 
-    // {"Person":{"name":true,"birthdate":true}}
     public EmpiEidInterceptorR4(String theEnterpriseIdentifierSystem, String theTagSystem, String theMatchCriteria) {
         super();
 
@@ -247,9 +246,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
     private List<IBaseResource> getPersonByPatientId(String patientId) {
 
         SearchParameterMap theParams = new SearchParameterMap();
-        ReferenceParam refParam = new ReferenceParam();
-        refParam.setValue(patientId);
-        theParams.add(Person.SP_LINK, refParam);
+        theParams.add(Person.SP_LINK, new ReferenceParam(patientId));
         theParams.setLoadSynchronousUpTo(10);
 
         IBundleProvider provider = myPersonDao.search(theParams);
@@ -314,11 +311,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         PersonLinkComponent plc = thePerson.addLink();
         Reference target = plc.getTarget();
         target.setReference(thePatientId);
-
-        String lastName = thePatient.getNameFirstRep().getFamily();
-        String firstName = thePatient.getNameFirstRep().getGivenAsSingleString();
-
-        target.setDisplay(lastName + ", " + firstName);
+        target.setDisplay(getLastName(thePatient) + ", " + getFirstName(thePatient));
         plc.setTarget(target);
 
         DaoMethodOutcome createdPerson = myPersonDao.create(thePerson);
@@ -333,11 +326,8 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         PersonLinkComponent plc = thePerson.addLink();
         Reference target = new Reference();
         target.setReference(thePatientId);
-
-        String lastName = thePatient.getNameFirstRep().getFamily();
-        String firstName = thePatient.getNameFirstRep().getGivenAsSingleString();
-
-        target.setDisplay(lastName + ", " + firstName);
+        target.setDisplay(getLastName(thePatient) + ", " + getFirstName(thePatient));
+        
         plc.setTarget(target);
 
         myPersonDao.update(thePerson);
