@@ -10,6 +10,7 @@ import org.hl7.fhir.instance.model.Conformance.SearchModifierCode;
 import org.hl7.fhir.instance.model.api.IBaseCoding;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.instance.model.api.IIdType;
+import org.hl7.fhir.r4.model.Address;
 import org.hl7.fhir.r4.model.HumanName;
 import org.hl7.fhir.r4.model.Identifier;
 import org.hl7.fhir.r4.model.Patient;
@@ -60,7 +61,6 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
     private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(EmpiEidInterceptorR4.class);
 
-    // -- TODO move to common place
     public static final String TAG_DUP_PERSON = "dupPerson";
     // When create a Person, do not search for the matched person, create eid
     // that person
@@ -81,9 +81,15 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
     private String myEnterpriseIdentifierSystem;
     private String myTagSystem;
 
-    private String myMatchPersonName;
-    private String myMatchPersonBirthDate;
-    private String myMatchPersonGender;
+    private String myPersonMatchName;
+
+    // -- all exact match only
+    private String myPersonMatchBirthDate;
+    private String myPersonMatchGender;
+    private String myPersonMatchAddressCity;
+    private String myPersonMatchAddressCountry;
+    private String myPersonMatchAddressPostalcode;
+    private String myPersonMatchAddressState;
 
     public EmpiEidInterceptorR4(String theEnterpriseIdentifierSystem, String theTagSystem, String theMatchCriteria) {
         super();
@@ -155,7 +161,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
             // -- not very efficient, search the person twice, in precreate and
             // created
-            // -- how do i pass the result over?
+            // -- how to pass the result over?
             if (size > 1) {
                 // found multiple person, inject the tag on person
                 injectTag(thePatient, TAG_DUP_PERSON, "Same name:" + thePatient.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePatient.getBirthDateElement().getValueAsString());
@@ -173,7 +179,6 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             List<IBaseResource> matchedPersonList = getMatchedPerson(thePatient);
             int size = matchedPersonList.size();
 
-            System.out.println("size = " + size);
             if (size == 0) {
                 // No Person with same name and birth date found from this
                 // patient.
@@ -213,7 +218,6 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             // 3. create new EID if there is no EID from old resource
             injectEid(theNewPerson, null); // inject new EID
         }
-
     }
 
     @Override
@@ -262,7 +266,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         theParams.setLoadSynchronousUpTo(10);
 
         // -- name
-        if (StringUtils.isNotEmpty(myMatchPersonName)) {
+        if (StringUtils.isNotEmpty(myPersonMatchName)) {
 
             StringAndListParam theNameParams = getName(theResource);
             if (theNameParams != null)
@@ -274,7 +278,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         }
 
         // only support EQ, the other is ignored
-        if (StringUtils.isNotEmpty(myMatchPersonBirthDate)) {
+        if (StringUtils.isNotEmpty(myPersonMatchBirthDate)) {
             DateParam birthDate = getBirthDate(theResource);
             if (birthDate != null)
                 theParams.add(Person.SP_BIRTHDATE, birthDate);
@@ -282,7 +286,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
                 return Collections.<IBaseResource>emptyList();
         }
 
-        if (StringUtils.isNotEmpty(myMatchPersonGender)) { // only exact match
+        if (StringUtils.isNotEmpty(myPersonMatchGender)) { // only exact match
             TokenParam theGender = getGender(theResource);
             if (theGender != null)
                 theParams.add(Person.SP_GENDER, theGender);
@@ -290,6 +294,41 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
                 return Collections.<IBaseResource>emptyList();
         }
 
+        // only exact match
+        if (StringUtils.isNotEmpty(myPersonMatchAddressCity)) { 
+            StringParam theField = getAddressField(theResource, Person.SP_ADDRESS_CITY);
+            if (theField != null)
+                theParams.add(Person.SP_ADDRESS_CITY, theField);
+            else
+                return Collections.<IBaseResource>emptyList();
+        }
+
+        // only exact match
+        if (StringUtils.isNotEmpty(myPersonMatchAddressCountry)) {
+            StringParam theField = getAddressField(theResource, Person.SP_ADDRESS_COUNTRY);
+            if (theField != null)
+                theParams.add(Person.SP_ADDRESS_COUNTRY, theField);
+            else
+                return Collections.<IBaseResource>emptyList();
+        }
+
+        // only exact match
+        if (StringUtils.isNotEmpty(myPersonMatchAddressPostalcode)) {
+            StringParam theField = getAddressField(theResource, Person.SP_ADDRESS_POSTALCODE);
+            if (theField != null)
+                theParams.add(Person.SP_ADDRESS_POSTALCODE, theField);
+            else
+                return Collections.<IBaseResource>emptyList();
+        }
+
+        // only exact match
+        if (StringUtils.isNotEmpty(myPersonMatchAddressState)) { 
+            StringParam theField = getAddressField(theResource, Person.SP_ADDRESS_STATE);
+            if (theField != null)
+                theParams.add(Person.SP_ADDRESS_STATE, theField);
+            else
+                return Collections.<IBaseResource>emptyList();
+        }
         IBundleProvider provider = myPersonDao.search(theParams);
         List<IBaseResource> theOtherPatientList = provider.getResources(0, provider.size());
 
@@ -327,7 +366,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         Reference target = new Reference();
         target.setReference(thePatientId);
         target.setDisplay(getLastName(thePatient) + ", " + getFirstName(thePatient));
-        
+
         plc.setTarget(target);
 
         myPersonDao.update(thePerson);
@@ -390,15 +429,30 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         JsonObject thePersonMatchCriteria = myMatchCriteria.get("Person").getAsJsonObject();
         if (thePersonMatchCriteria != null) {
             if (thePersonMatchCriteria.has(Person.SP_NAME)) {
-                myMatchPersonName = thePersonMatchCriteria.get(Person.SP_NAME).getAsString();
+                myPersonMatchName = thePersonMatchCriteria.get(Person.SP_NAME).getAsString();
             }
             if (thePersonMatchCriteria.has(Person.SP_BIRTHDATE)) {
-                myMatchPersonBirthDate = thePersonMatchCriteria.get(Person.SP_BIRTHDATE).getAsString();
+                myPersonMatchBirthDate = thePersonMatchCriteria.get(Person.SP_BIRTHDATE).getAsString();
 
             }
             if (thePersonMatchCriteria.has(Person.SP_GENDER)) {
-                myMatchPersonGender = thePersonMatchCriteria.get(Person.SP_GENDER).getAsString();
+                myPersonMatchGender = thePersonMatchCriteria.get(Person.SP_GENDER).getAsString();
+            }
 
+            if (thePersonMatchCriteria.has(Person.SP_ADDRESS_CITY)) {
+                myPersonMatchAddressCity = thePersonMatchCriteria.get(Person.SP_ADDRESS_CITY).getAsString();
+            }
+
+            if (thePersonMatchCriteria.has(Person.SP_ADDRESS_COUNTRY)) {
+                myPersonMatchAddressCountry = thePersonMatchCriteria.get(Person.SP_ADDRESS_COUNTRY).getAsString();
+            }
+
+            if (thePersonMatchCriteria.has(Person.SP_ADDRESS_POSTALCODE)) {
+                myPersonMatchAddressPostalcode = thePersonMatchCriteria.get(Person.SP_ADDRESS_POSTALCODE).getAsString();
+            }
+
+            if (thePersonMatchCriteria.has(Person.SP_ADDRESS_STATE)) {
+                myPersonMatchAddressState = thePersonMatchCriteria.get(Person.SP_ADDRESS_STATE).getAsString();
             }
         }
     }
@@ -412,7 +466,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             return null;
 
         StringAndListParam theNameParams = new StringAndListParam();
-        if (SearchModifierCode.EXACT.toString().equalsIgnoreCase(myMatchPersonName)) {
+        if (SearchModifierCode.EXACT.toString().equalsIgnoreCase(myPersonMatchName)) {
             return theNameParams.addAnd(new StringOrListParam().addOr(new StringParam(lastName, true)).addOr(new StringParam(firstName, true)));
         } else {
             return theNameParams.addAnd(new StringOrListParam().addOr(new StringParam(lastName, false)).addOr(new StringParam(firstName, false)));
@@ -485,6 +539,41 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
                 return theGenderToken;
             }
         }
+
+        return null;
+    }
+
+    private StringParam getAddressField(IBaseResource theResource, String addressField) {
+
+        Address address = null;
+        if (theResource instanceof Person) {
+            address = ((Person) theResource).getAddressFirstRep();
+        } else if (theResource instanceof Patient) {
+            address = ((Patient) theResource).getAddressFirstRep();
+        } else {
+            return null;
+        }
+
+        if (Person.SP_ADDRESS_CITY.equals(addressField))
+            if (StringUtils.isEmpty(address.getCity()))
+                return null;
+            else
+                return new StringParam(address.getCity(), true);
+        else if (Person.SP_ADDRESS_COUNTRY.equals(addressField))
+            if (StringUtils.isEmpty(address.getCountry()))
+                return null;
+            else
+                return new StringParam(address.getCountry(), true);
+        else if (Person.SP_ADDRESS_POSTALCODE.equals(addressField))
+            if (StringUtils.isEmpty(address.getPostalCode()))
+                return null;
+            else
+                return new StringParam(address.getPostalCode(), true);
+        else if (Person.SP_ADDRESS_STATE.equals(addressField))
+            if (StringUtils.isEmpty(address.getState()))
+                return null;
+            else
+                return new StringParam(address.getState(), true);
 
         return null;
     }

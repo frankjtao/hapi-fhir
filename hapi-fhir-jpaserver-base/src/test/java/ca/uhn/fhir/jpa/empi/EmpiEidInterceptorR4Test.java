@@ -14,7 +14,6 @@ import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Person;
-import org.hl7.fhir.r4.model.SearchParameter;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
