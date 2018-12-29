@@ -164,7 +164,7 @@ public class EmpiEidInterceptorAddressR4Test extends BaseJpaR4Test {
         Coding theTag = createdPerson2.getMeta().getTagFirstRep();
         assertEquals(EMPI_TAG_SYSTEM, theTag.getSystem());
         assertEquals("dupPerson", theTag.getCode());        
-        assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag.getDisplay());
+        assertEquals("Same name birthdate address.postalcode found.", theTag.getDisplay());
         
         // 4. verify the dupTag is injected to the first person too
         SearchParameterMap theParams = new SearchParameterMap();
@@ -177,7 +177,7 @@ public class EmpiEidInterceptorAddressR4Test extends BaseJpaR4Test {
         
         assertEquals(EMPI_TAG_SYSTEM, theTag2.getSystem());
         assertEquals(EmpiEidInterceptorR4.TAG_DUP_PERSON, theTag2.getCode());        
-        assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag2.getDisplay());  
+        assertEquals("Same name birthdate address.postalcode found.", theTag2.getDisplay());  
     }
     
     @Test

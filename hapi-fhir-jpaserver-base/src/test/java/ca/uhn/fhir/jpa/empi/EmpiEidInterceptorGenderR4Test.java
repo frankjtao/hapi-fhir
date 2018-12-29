@@ -9,13 +9,10 @@ import java.util.List;
 
 import org.hl7.fhir.dstu3.model.codesystems.SearchComparator;
 import org.hl7.fhir.instance.model.Conformance.SearchModifierCode;
-import org.hl7.fhir.instance.model.api.IBaseCoding;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Enumerations.AdministrativeGender;
-import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Person;
-import org.hl7.fhir.r4.model.SearchParameter;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -31,7 +28,6 @@ import ca.uhn.fhir.jpa.dao.r4.BaseJpaR4Test;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
 import ca.uhn.fhir.rest.param.NumberParam;
-import ca.uhn.fhir.rest.param.ReferenceParam;
 import ca.uhn.fhir.util.TestUtil;
 
 public class EmpiEidInterceptorGenderR4Test extends BaseJpaR4Test {
@@ -148,7 +144,7 @@ public class EmpiEidInterceptorGenderR4Test extends BaseJpaR4Test {
         Coding theTag = createdPerson2.getMeta().getTagFirstRep();
         assertEquals(EMPI_TAG_SYSTEM, theTag.getSystem());
         assertEquals("dupPerson", theTag.getCode());        
-        assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag.getDisplay());
+        assertEquals("Same name birthdate gender found.", theTag.getDisplay());
         
         // 4. verify the dupTag is injected to the first person too
         SearchParameterMap theParams = new SearchParameterMap();
@@ -161,7 +157,7 @@ public class EmpiEidInterceptorGenderR4Test extends BaseJpaR4Test {
         
         assertEquals(EMPI_TAG_SYSTEM, theTag2.getSystem());
         assertEquals(EmpiEidInterceptorR4.TAG_DUP_PERSON, theTag2.getCode());        
-        assertEquals("Same name:bar foo and birthdate:2000-01-01", theTag2.getDisplay());  
+        assertEquals("Same name birthdate gender found.", theTag2.getDisplay());  
     }
     
     @Test

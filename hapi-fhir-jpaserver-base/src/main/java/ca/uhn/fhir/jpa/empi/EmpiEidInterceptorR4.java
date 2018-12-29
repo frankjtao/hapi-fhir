@@ -91,6 +91,8 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
     private String myPersonMatchAddressPostalcode;
     private String myPersonMatchAddressState;
 
+    private String myTagMessage;
+    
     public EmpiEidInterceptorR4(String theEnterpriseIdentifierSystem, String theTagSystem, String theMatchCriteria) {
         super();
 
@@ -139,15 +141,14 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
                 if (size == 0) {
                     injectEid(thePerson, null); // create new EID
                 } else {
-                    injectTag(thePerson, TAG_DUP_PERSON, "Same name:" + thePerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePerson.getBirthDateElement().getValueAsString());
+                    injectTag(thePerson, TAG_DUP_PERSON, myTagMessage);
                 }
 
                 // -- inject the tag for all matched person
                 for (IBaseResource matchedResouce : matchedPersonList) {
                     Person matchedPerson = (Person) matchedResouce;
                     if (!hasTag(matchedPerson, TAG_DUP_PERSON)) {
-                        injectTag(matchedPerson, TAG_DUP_PERSON,
-                                "Same name:" + matchedPerson.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + matchedPerson.getBirthDateElement().getValueAsString());
+                        injectTag(matchedPerson, TAG_DUP_PERSON, myTagMessage);
                         myPersonDao.update(matchedPerson);
                     }
                 }
@@ -164,7 +165,22 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             // -- how to pass the result over?
             if (size > 1) {
                 // found multiple person, inject the tag on person
-                injectTag(thePatient, TAG_DUP_PERSON, "Same name:" + thePatient.getNameFirstRep().getNameAsSingleString() + " and birthdate:" + thePatient.getBirthDateElement().getValueAsString());
+                injectTag(thePatient, TAG_DUP_PERSON, myTagMessage);
+            }
+            
+        } else if (myPractitionerDao.getContext().getResourceDefinition(theResource).getName().equals("Practitioner")) {
+
+            Practitioner thePractitioner = (Practitioner) theResource;
+            // -- Get matched person list.
+            List<IBaseResource> matchedPersonList = getMatchedPerson(thePractitioner);
+            int size = matchedPersonList.size();
+
+            // -- not very efficient, search the person twice, in precreate and
+            // created
+            // -- how to pass the result over?
+            if (size > 1) {
+                // found multiple person, inject the tag on person
+                injectTag(thePractitioner, TAG_DUP_PERSON, myTagMessage);
             }
         }
     }
@@ -192,7 +208,28 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             } else {
                 // do nothing, in the preCreated, the dup_person tag is injected
             }
+        } else if (myPractitionerDao.getContext().getResourceDefinition(theResource).getName().equals("Practitioner")) {
+
+            Practitioner thePractitioner = (Practitioner) theResource;
+            // -- Get matched person list.
+            List<IBaseResource> matchedPersonList = getMatchedPerson(thePractitioner);
+            int size = matchedPersonList.size();
+
+            if (size == 0) {
+                // No Person with same name and birth date found from this
+                // patient.
+                // create the Person, and linked the patient to the person
+                createPersonFromPractitioner(thePractitioner);
+            } else if (size == 1) {
+                // Found one person with same name and birth date.
+                // link the patient to the person
+                Person theMatchedPerson = (Person) matchedPersonList.get(0);
+                linkPatientToThePerson(thePractitioner, theMatchedPerson);
+            } else {
+                // do nothing, in the preCreated, the dup_person tag is injected
+            }
         }
+
 
     }
 
@@ -227,7 +264,7 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
             Patient thePatient = (Patient) theNewResource;
             // -- Get matched person list.
-            List<IBaseResource> matchedPersonList = getPersonByPatientId(thePatient.getId());
+            List<IBaseResource> matchedPersonList = getPersonByLinkId(thePatient.getId());
             int size = matchedPersonList.size();
 
             if (size == 0) {
@@ -243,11 +280,30 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
                 // something wrong
                 throw new UnprocessableEntityException("Found multiple matched person linked to the patinet : " + thePatient.getId());
             }
+        } else if (myPractitionerDao.getContext().getResourceDefinition(theNewResource).getName().equals("Practitioner")) {
 
+            Practitioner thePractioner = (Practitioner) theNewResource;
+            // -- Get matched person list.
+            List<IBaseResource> matchedPersonList = getPersonByLinkId(thePractioner.getId());
+            int size = matchedPersonList.size();
+
+            if (size == 0) {
+                // The Patient is not linked to and Person
+                // create the Person, and linked the patient to the person
+                createPersonFromPractitioner(thePractioner);
+            } else if (size == 1) {
+                // Found one person with linked to this Patient.
+                // do nothing
+                return;
+            } else {
+                // Found multiple person linked to this Patient,
+                // something wrong
+                throw new UnprocessableEntityException("Found multiple matched person linked to the patinet : " + thePractioner.getId());
+            }
         }
     }
 
-    private List<IBaseResource> getPersonByPatientId(String patientId) {
+    private List<IBaseResource> getPersonByLinkId(String patientId) {
 
         SearchParameterMap theParams = new SearchParameterMap();
         theParams.add(Person.SP_LINK, new ReferenceParam(patientId));
@@ -342,6 +398,11 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         Person thePerson = new Person();
         thePerson.addName(thePatient.getNameFirstRep());
         thePerson.setBirthDate(thePatient.getBirthDateElement().getValue());
+        thePerson.setGender(thePatient.getGender());
+        List<Address> thePatientAddressList = thePatient.getAddress();
+        for (Address address: thePatientAddressList) {
+            thePerson.addAddress(address);
+        }
 
         Identifier theEid = thePerson.addIdentifier();
         theEid.setSystem(myEnterpriseIdentifierSystem);
@@ -358,14 +419,46 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         return createdPerson.getId();
     }
 
-    private void linkPatientToThePerson(Patient thePatient, Person thePerson) {
+    private IIdType createPersonFromPractitioner(Practitioner thePractitioner) {
 
-        String thePatientId = thePatient.getId();
+        String thePractionerId = thePractitioner.getId();
+
+        Person thePerson = new Person();
+        thePerson.addName(thePractitioner.getNameFirstRep());
+        thePerson.setBirthDate(thePractitioner.getBirthDateElement().getValue());
+        thePerson.setGender(thePractitioner.getGender());
+        List<Address> thePractionerAddressList = thePractitioner.getAddress();
+        for (Address address: thePractionerAddressList) {
+            thePerson.addAddress(address);
+        }
+
+        Identifier theEid = thePerson.addIdentifier();
+        theEid.setSystem(myEnterpriseIdentifierSystem);
+        theEid.setValue(UUID.randomUUID().toString());
+
+        PersonLinkComponent plc = thePerson.addLink();
+        Reference target = plc.getTarget();
+        target.setReference(thePractionerId);
+        target.setDisplay(getLastName(thePractitioner) + ", " + getFirstName(thePractitioner));
+        plc.setTarget(target);
+
+        DaoMethodOutcome createdPerson = myPersonDao.create(thePerson);
+
+        return createdPerson.getId();
+    }
+
+    private void linkPatientToThePerson(IBaseResource theResource, Person thePerson) {
+
+        String theTargetResourceId = null;
+        if (theResource instanceof Patient)             
+            theTargetResourceId = ((Patient)theResource).getId();
+        else if (theResource instanceof Practitioner)
+            theTargetResourceId = ((Practitioner)theResource).getId();
 
         PersonLinkComponent plc = thePerson.addLink();
         Reference target = new Reference();
-        target.setReference(thePatientId);
-        target.setDisplay(getLastName(thePatient) + ", " + getFirstName(thePatient));
+        target.setReference(theTargetResourceId);
+        target.setDisplay(getLastName(theResource) + ", " + getFirstName(theResource));
 
         plc.setTarget(target);
 
@@ -424,36 +517,47 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
 
     private void parseMatchCriteria(String theMatchJsonString) {
 
+        StringBuilder theMessage = new StringBuilder();
+        theMessage.append("Same ");
         JsonObject myMatchCriteria = JSONUtil.parse(theMatchJsonString);
 
         JsonObject thePersonMatchCriteria = myMatchCriteria.get("Person").getAsJsonObject();
         if (thePersonMatchCriteria != null) {
             if (thePersonMatchCriteria.has(Person.SP_NAME)) {
                 myPersonMatchName = thePersonMatchCriteria.get(Person.SP_NAME).getAsString();
+                theMessage.append("name ");
             }
             if (thePersonMatchCriteria.has(Person.SP_BIRTHDATE)) {
                 myPersonMatchBirthDate = thePersonMatchCriteria.get(Person.SP_BIRTHDATE).getAsString();
-
+                theMessage.append("birthdate ");
             }
             if (thePersonMatchCriteria.has(Person.SP_GENDER)) {
                 myPersonMatchGender = thePersonMatchCriteria.get(Person.SP_GENDER).getAsString();
+                theMessage.append("gender ");
             }
 
             if (thePersonMatchCriteria.has(Person.SP_ADDRESS_CITY)) {
                 myPersonMatchAddressCity = thePersonMatchCriteria.get(Person.SP_ADDRESS_CITY).getAsString();
+                theMessage.append("address.city ");
             }
 
             if (thePersonMatchCriteria.has(Person.SP_ADDRESS_COUNTRY)) {
                 myPersonMatchAddressCountry = thePersonMatchCriteria.get(Person.SP_ADDRESS_COUNTRY).getAsString();
+                theMessage.append("address.country ");
             }
 
             if (thePersonMatchCriteria.has(Person.SP_ADDRESS_POSTALCODE)) {
                 myPersonMatchAddressPostalcode = thePersonMatchCriteria.get(Person.SP_ADDRESS_POSTALCODE).getAsString();
+                theMessage.append("address.postalcode ");
             }
 
             if (thePersonMatchCriteria.has(Person.SP_ADDRESS_STATE)) {
                 myPersonMatchAddressState = thePersonMatchCriteria.get(Person.SP_ADDRESS_STATE).getAsString();
+                theMessage.append("address.state ");
             }
+            
+            theMessage.append("found.");
+            myTagMessage = theMessage.toString();
         }
     }
 
@@ -484,6 +588,10 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             Patient thePatient = (Patient) theResource;
             HumanName name = thePatient.getNameFirstRep();
             return name.getFamily();
+        } else if (theResource instanceof Practitioner) {
+            Practitioner thePractitioner = (Practitioner) theResource;
+            HumanName name = thePractitioner.getNameFirstRep();
+            return name.getFamily();
         }
 
         return null;
@@ -498,6 +606,10 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
         } else if (theResource instanceof Patient) {
             Patient thePatient = (Patient) theResource;
             HumanName name = thePatient.getNameFirstRep();
+            return name.getGivenAsSingleString();
+        } else if (theResource instanceof Practitioner) {
+            Practitioner thePractitioner = (Practitioner) theResource;
+            HumanName name = thePractitioner.getNameFirstRep();
             return name.getGivenAsSingleString();
         }
 
@@ -516,6 +628,12 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             Patient thePatient = (Patient) theResource;
             if (thePatient.hasBirthDate())
                 return new DateParam(thePatient.getBirthDateElement().asStringValue());
+            else
+                return null;
+        } else if (theResource instanceof Practitioner) {
+            Practitioner thePractitioner = (Practitioner) theResource;
+            if (thePractitioner.hasBirthDate())
+                return new DateParam(thePractitioner.getBirthDateElement().asStringValue());
             else
                 return null;
         }
@@ -538,6 +656,12 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
                 theGenderToken = new TokenParam(thePatient.getGender().getSystem(), thePatient.getGender().toCode());
                 return theGenderToken;
             }
+        } else if (theResource instanceof Practitioner) {
+            Practitioner thePractitioner = (Practitioner) theResource;
+            if (thePractitioner.hasGender()) {
+                theGenderToken = new TokenParam(thePractitioner.getGender().getSystem(), thePractitioner.getGender().toCode());
+                return theGenderToken;
+            }
         }
 
         return null;
@@ -550,6 +674,8 @@ public class EmpiEidInterceptorR4 extends ServerOperationInterceptorAdapter {
             address = ((Person) theResource).getAddressFirstRep();
         } else if (theResource instanceof Patient) {
             address = ((Patient) theResource).getAddressFirstRep();
+        } else if (theResource instanceof Practitioner) {
+            address = ((Practitioner) theResource).getAddressFirstRep();        
         } else {
             return null;
         }
